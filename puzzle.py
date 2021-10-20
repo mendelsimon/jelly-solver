@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 from collections import deque
+import colorama
 
 class Color(Enum):
     red = 1
@@ -190,6 +191,13 @@ class State:
 
 
 def print_transition(transition: StateTransition, print_idx_and_dir=True):
+    color_lookup = {
+        Color.red: colorama.Fore.RED,
+        Color.green: colorama.Fore.GREEN,
+        Color.blue: colorama.Fore.BLUE,
+        Color.yellow: colorama.Fore.YELLOW,
+        Color.x: colorama.Fore.MAGENTA,
+    }
     if print_idx_and_dir:
         print(transition.movable_idx, transition.direction.name)
     state = transition.state
@@ -200,7 +208,8 @@ def print_transition(transition: StateTransition, print_idx_and_dir=True):
         if state.tile_board[i]:
             out += '#'
         elif state.movable_idx_board[i] is not None:
-            out += str(state.movable_idx_board[i])
+            color = state.movables[state.movable_idx_board[i]].color
+            out += color_lookup[color] + str(state.movable_idx_board[i]) + colorama.Style.RESET_ALL
         else:
             out += ' '
 
@@ -277,7 +286,8 @@ def solve(puzzle: State) -> list[StateTransition]:
 
 if __name__ == '__main__':
     # Test by inspecting printed contents
-    with open('puzzles/real_levels/02.txt', 'r') as f:
+    colorama.init() # Enable color printing
+    with open('puzzles/real_levels/01.txt', 'r') as f:
         state = parse_puzzle(f.read())
     solution = solve(state)
     print_transition(StateTransition(state, None, None), print_idx_and_dir=False)
