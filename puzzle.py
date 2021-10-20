@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+from collections import deque
 
 class Color(Enum):
     red = 1
@@ -52,16 +53,28 @@ class Block(Movable):
     def __init__(self, coords: list[Coord]) -> None:
         super().__init__(coords, Color.x, False)
 
+@dataclass
+class StateTransition:
+    state: State
+    movable_idx: int
+    direction: Direction
+
 class State:
     def __init__(self, movables: list[Movable], tile_locations: list[Coord], width: int = 14, height: int = 10) -> None:
         self.movables: list[Movable] = movables
         self.width: int = width
         self.height: int = height
-        self.movable_idx_board: list[Optional[int]]
+        self.movable_idx_board: list[Optional[int]] = []
         self.tile_board: list[bool] = [False] * (width * height)
         for coord in tile_locations:
             self.tile_board[self._coord_to_index(coord)] = True
         self._rebuild_board()
+
+    def __hash__(self) -> int:
+        return hash(tuple(self.movable_idx_board))
+
+    def __eq__(self, other: object) -> bool:
+        return other.__class__ is self.__class__ and self.movable_idx_board == other.movable_idx_board
 
     def _coord_to_index(self, coord: Coord):
         return coord.x + coord.y * self.width
@@ -100,7 +113,19 @@ class State:
             return None
         state._gravity()
         state._fuse_movables()
+        state._rebuild_board()
         return state
+
+    def get_all_state_transitions(self) -> list[StateTransition]:
+        state_transitions = []
+        for movable_idx in range(len(self.movables)):
+            new_state = self.move(movable_idx, Direction.left)
+            if new_state:
+                state_transitions.append(StateTransition(new_state, movable_idx, Direction.left))
+            new_state = self.move(movable_idx, Direction.right)
+            if new_state:
+                state_transitions.append(StateTransition(new_state, movable_idx, Direction.right))
+        return state_transitions
 
     def _move_movable_in_direction(self, movable_idx: int, direction: Direction, movables_moved: set[int]) -> Optional[State]:
         if self.movables[movable_idx].is_anchored:
@@ -163,29 +188,35 @@ class State:
                 coord_idx += 1
             idx += 1        
 
-    # def _fuse_popouts(self) -> Optional[State]:
-    #     pass
 
-
-def print_board(state: State):
+def print_transition(transition: StateTransition, print_idx_and_dir=True):
+    if print_idx_and_dir:
+        print(transition.movable_idx, transition.direction.name)
+    state = transition.state
+    out = ''
     for i in range(state.width * state.height):
-        if i % state.width == 0:
-            print()
-
+        if i % state.width == 0 and i > 0:
+            out += '\n'
         if state.tile_board[i]:
-            print('#', end='')
+            out += '#'
         elif state.movable_idx_board[i] is not None:
-            # print(state.movables[state.movable_idx_board[i]].color.name[0], end='')
-            print(state.movable_idx_board[i], end='')
+            out += str(state.movable_idx_board[i])
         else:
-            print(' ', end='')
-    print(state.is_win_state())
+            out += ' '
+
+    out += "\n"
+    for color in Color:
+        out += color.name + "(" + ' '.join(str(i) for i, m in enumerate(state.movables) if m.color == color) + ") "
+    out += "\n"
+
+    print(out)
+    return out
 
 def move(state: State, movable_idx: int, direction: Direction):
     new_state = state.move(movable_idx, direction)
     if (new_state):
         state = new_state
-    print_board(state)
+    print_transition(StateTransition(state, movable_idx, direction))
     return state
 
 def parse_puzzle(raw_text: str) -> State:
@@ -209,16 +240,47 @@ def parse_puzzle(raw_text: str) -> State:
 
     return State(movables, tile_locations, width, height)
 
+
+def solve(puzzle: State) -> list[StateTransition]:
+    if puzzle.is_win_state():
+        return [puzzle]
+    seen_states: set = {puzzle}
+    state_transition_tree: deque[tuple[int, StateTransition]] = []
+    states_to_explore: deque[State] = deque()
+
+    for transition in puzzle.get_all_state_transitions():
+        if transition.state not in seen_states:
+            if transition.state.is_win_state():
+                return [transition]
+            state_transition_tree.append((-1, transition))
+            states_to_explore.append(transition.state)
+            seen_states.add(transition.state)
+    
+    state_idx = 0
+    while len(states_to_explore) > 0:
+        # We're popping #state_idx, i.e. state_idx is the parent idx of any new state transitions
+        state = states_to_explore.popleft() # breadth-first search 
+        for transition in state.get_all_state_transitions():
+            if transition.state not in seen_states:
+                if transition.state.is_win_state():
+                    winning_moves = deque([transition])
+                    parent_idx = state_idx
+                    while parent_idx != -1:
+                        parent_idx, transition = state_transition_tree[parent_idx]
+                        winning_moves.appendleft(transition)
+                    return list(winning_moves)
+                state_transition_tree.append((state_idx, transition))
+                states_to_explore.append(transition.state)
+                seen_states.add(transition.state)
+        state_idx += 1
+    raise Exception("No more states to explore")
+
 if __name__ == '__main__':
     # Test by inspecting printed contents
-    with open('puzzles/steps.txt', 'r') as f:
+    with open('puzzles/real_levels/02.txt', 'r') as f:
         state = parse_puzzle(f.read())
-    print_board(state)
-    state = move(state, 0, Direction.right)
-    state = move(state, 0, Direction.left)
-    state = move(state, 0, Direction.left)
-    state = move(state, 0, Direction.left)
-    state = move(state, 0, Direction.left)
-    state = move(state, 0, Direction.left)
-    state = move(state, 0, Direction.left)
+    solution = solve(state)
+    print_transition(StateTransition(state, None, None), print_idx_and_dir=False)
+    for transition in solution:
+        print_transition(transition)
     
